@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>傘いれてゲーム</title>
+<script src="/socket.io/socket.io.js"></script>
+
+<style>
+body {
+  margin: 0;
+  font-family: sans-serif;
+  text-align: center;
+  color: white;
+  background: linear-gradient(135deg, #667eea, #764ba2);
+}
+
+h1 {
+  margin-top: 20px;
+}
+
+.card {
+  background: rgba(255,255,255,0.1);
+  padding: 20px;
+  margin: 15px;
+  border-radius: 15px;
+  backdrop-filter: blur(10px);
+}
+
+button {
+  padding: 12px 20px;
+  border: none;
+  border-radius: 10px;
+  font-size: 16px;
+  margin-top: 10px;
+  background: #ffcc00;
+  color: black;
+  font-weight: bold;
+}
+
+input {
+  padding: 10px;
+  border-radius: 8px;
+  border: none;
+  margin-top: 10px;
+  width: 80%;
+}
+
+.player {
+  margin: 5px;
+}
+
+.selected {
+  background: rgba(0,200,255,0.3);
+  padding: 10px;
+  border-radius: 10px;
+  margin: 5px;
+}
+
+.not-selected {
+  background: rgba(255,0,0,0.3);
+  padding: 10px;
+  border-radius: 10px;
+  margin: 5px;
+}
+
+.fade-in {
+  animation: fadeIn 1s ease;
+}
+
+.countdown {
+  font-size: 60px;
+  font-weight: bold;
+  animation: pop 0.5s ease;
+}
+
+.result-card {
+  animation: reveal 0.8s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(20px);}
+  to { opacity: 1; transform: translateY(0);}
+}
+
+@keyframes pop {
+  0% { transform: scale(0.5); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+@keyframes reveal {
+  from { opacity: 0; transform: scale(0.8);}
+  to { opacity: 1; transform: scale(1);}
+}
+</style>
+</head>
+
+<body>
+
+<h1>☂ 傘いれてゲーム</h1>
+<div id="app"></div>
+
+<script>
+const socket = io();
+let roomId = "room1";
+
+function start() {
+  document.getElementById("app").innerHTML = `
+    <div class="card fade-in">
+      <h2>名前を入力</h2>
+      <input id="name" placeholder="ニックネーム"/>
+      <br>
+      <button onclick="join()">参加</button>
+    </div>
+  `;
+}
+
+function join() {
+  const name = document.getElementById("name").value;
+  socket.emit("joinRoom", { roomId, name });
+
+  document.getElementById("app").innerHTML = `
+    <div class="card fade-in">
+      <h2>参加者</h2>
+      <div id="players"></div>
+      <button onclick="startGame()">ゲーム開始</button>
+    </div>
+  `;
+}
+
+socket.on("updatePlayers", (players) => {
+  document.getElementById("players").innerHTML =
+    players.map(p => `<div class="player">${p.name}</div>`).join("");
+});
+
+function startGame() {
+  socket.emit("startGame", roomId);
+}
+
+socket.on("gameStarted", (players) => {
+  const me = players.find(p => p.id === socket.id);
+
+  if (me.role === "parent") {
+    document.getElementById("app").innerHTML = `
+      <div class="card fade-in">
+        <h2 style="color:yellow;">あなたは親 ☀</h2>
+        <p>みんなの条件を待っています…</p>
+      </div>
+    `;
+  } else {
+    document.getElementById("app").innerHTML = `
+      <div class="card fade-in">
+        <h2>条件を入力（匿名）</h2>
+        <input id="cond" placeholder="例：ジュース奢る"/>
+        <br>
+        <button onclick="sendCond()">送信</button>
+      </div>
+    `;
+  }
+});
+
+function sendCond() {
+  const condition = document.getElementById("cond").value;
+  socket.emit("submitCondition", { roomId, condition });
+
+  document.getElementById("app").innerHTML = `
+    <div class="card fade-in">
+      <h2>送信完了 🎉</h2>
+      <p>他の人を待っています…</p>
+    </div>
+  `;
+}
+
+socket.on("allConditionsReady", (players) => {
+  const me = players.find(p => p.id === socket.id);
+
+  if (me.role === "parent") {
+    document.getElementById("app").innerHTML =
+      `<div class="card fade-in">
+        <h2>誰を傘に入れる？ ☂</h2>` +
+      players.filter(p => p.role === "child")
+      .map(p =>
+        `<div>
+          <input type="checkbox" value="${p.id}">
+          ${p.condition}
+        </div>`
+      ).join("") +
+      `<button onclick="select()">決定</button></div>`;
+  }
+});
+
+function select() {
+  const checked = [...document.querySelectorAll("input:checked")]
+    .map(i => i.value);
+
+  socket.emit("selectPlayers", { roomId, selectedIds: checked });
+}
+
+socket.on("showResult", (players) => {
+  const app = document.getElementById("app");
+
+  let count = 3;
+
+  app.innerHTML = `
+    <div class="card">
+      <h2>結果発表…</h2>
+      <div id="count" class="countdown">${count}</div>
+    </div>
+  `;
+
+  const interval = setInterval(() => {
+    count--;
+
+    if (count > 0) {
+      document.getElementById("count").innerText = count;
+    } else if (count === 0) {
+      document.getElementById("count").innerText = "☂";
+    } else {
+      clearInterval(interval);
+
+      app.innerHTML =
+        `<div class="card result-card">
+          <h2>結果発表 ☂</h2>` +
+        players.map(p =>
+          `<div class="${p.selected ? "selected" : "not-selected"}">
+            <strong>${p.name}</strong><br>
+            ${p.condition || ""}
+          </div>`
+        ).join("") +
+        `</div>`;
+    }
+  }, 1000);
+});
+
+start();
+</script>
+
+</body>
+</html>
